@@ -1,0 +1,17 @@
+{
+  "name": "Lauf-Planer für Garmin",
+  "short_name": "Lauf-Planer",
+  "description": "KI-gestützter Laufstrecken-Planer mit GPX-Export für Garmin Forerunner.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1120",
+  "theme_color": "#0f766e",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
