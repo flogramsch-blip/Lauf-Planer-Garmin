@@ -64,8 +64,14 @@ und liefert eine kleine Weboberfläche aus.
    war es die Stromversorgung.
 4. **Zeigt die Matrix „Hallo!" aber kein WLAN?** Dann läuft der Sketch, nur der
    AP-Start klappt nicht → Punkt 3 ist am wahrscheinlichsten.
-5. **Anderer WLAN-Kanal:** im Sketch bei `WiFi.softAP(..., 1, 0)` die `1` auf
-   `6` oder `11` ändern.
+5. **Kein Gerät findet es, obwohl Serial `OK` zeigt?** Dann sendet der ESP das
+   Signal nicht sauber aus — fast immer **Brownout** (Punkt 3). Zuerst: Matrix
+   abklemmen, ESP allein an ein **Handy-Netzteil** mit kurzem Kabel, Reset,
+   erneut scannen.
+6. **Offenes Netz zum Testen:** im Sketch `#define OPEN_AP true` setzen und neu
+   flashen. Offene Netze zeigen Handys am zuverlässigsten. Klappt es offen,
+   war es die WPA2-Aushandlung/Signalstärke.
+7. **Anderer WLAN-Kanal:** `#define AP_CHANNEL` auf `6` oder `11` setzen.
 
 ## Häufige Anpassungen (im Sketch oben)
 

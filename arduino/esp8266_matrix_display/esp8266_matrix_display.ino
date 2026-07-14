@@ -49,8 +49,15 @@ MD_Parola display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 // WLAN ACCESS POINT
 // ---------------------------------------------------------------------------
 const char* AP_SSID     = "MatrixDisplay";
-const char* AP_PASSWORD = "12345678";        // mind. 8 Zeichen, sonst offenes Netz
+const char* AP_PASSWORD = "12345678";        // mind. 8 Zeichen
 const byte  DNS_PORT    = 53;
+
+// --- Fehlersuche-Schalter ---------------------------------------------------
+// OPEN_AP = true  -> Netz OHNE Passwort (offen). Offene Netze werden von Handys
+//                    am zuverlaessigsten angezeigt und verbunden -> guter Test.
+// AP_CHANNEL       -> falls das Netz nicht auftaucht, 6 oder 11 statt 1 testen.
+#define OPEN_AP     false
+#define AP_CHANNEL  1
 
 IPAddress apIP(192, 168, 4, 1);
 DNSServer dnsServer;
@@ -292,10 +299,15 @@ void setup() {
   WiFi.persistent(false);            // Flash-Schreibzugriffe vermeiden
   WiFi.disconnect(true);
   WiFi.mode(WIFI_AP);
+  // 11b: robusteste Modulation, beste Reichweite -> AP wird am zuverlaessigsten
+  // erkannt. Hilft, wenn das Netz bei knapper Stromversorgung nicht auftaucht.
+  WiFi.setPhyMode(WIFI_PHY_MODE_11B);
   delay(100);
 
-  // SSID sichtbar, Kanal 1. Bei Verbindungsproblemen: Kanal 6 oder 11 testen.
-  bool apOk = WiFi.softAP(AP_SSID, AP_PASSWORD, 1 /*Kanal*/, 0 /*sichtbar*/);
+  // Bei OPEN_AP kein Passwort uebergeben -> offenes Netz.
+  bool apOk = OPEN_AP
+    ? WiFi.softAP(AP_SSID, (const char*)nullptr, AP_CHANNEL, 0 /*sichtbar*/)
+    : WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, 0 /*sichtbar*/);
   delay(100);
   WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
 
