@@ -47,6 +47,26 @@ und liefert eine kleine Weboberfläche aus.
    (oder die automatisch aufpoppende Portal-Seite nutzen).
 4. Text eingeben, Modus/Geschwindigkeit/Helligkeit wählen, **An Display senden**.
 
+## WLAN erscheint nicht? — Fehlersuche
+
+1. **Seriellen Monitor öffnen** (Werkzeuge → Serieller Monitor), **115200 Baud**
+   einstellen, dann am ESP **RESET** drücken. Es sollte erscheinen:
+   `softAP() Ergebnis: OK` und `Access Point IP: 192.168.4.1`.
+   - Steht dort **OK** → der ESP sendet. Dann liegt es am Endgerät (s. Punkt 2).
+   - Steht dort **FEHLER** oder gar nichts / wirre Zeichen → s. Punkt 3.
+2. **Am Handy/Laptop:** WLAN-Liste manuell aktualisieren. `MatrixDisplay` ist ein
+   **2,4-GHz**-Netz — es taucht nicht in reinen 5-GHz-Listen auf. Manche Handys
+   verstecken „Netz ohne Internet"; einmal in den WLAN-Einstellungen suchen.
+3. **Stromversorgung / Brownout:** Läuft im Serial-Monitor ein ständiger Neustart
+   oder kommt nur Kauderwelsch, versorgt der USB-Port zu wenig Strom (WLAN erzeugt
+   Sendespitzen). Abhilfe: anderes/kürzeres USB-Kabel, anderer USB-Port oder ein
+   5-V-Netzteil. Zum Testen die Matrix kurz abklemmen — startet das WLAN dann,
+   war es die Stromversorgung.
+4. **Zeigt die Matrix „Hallo!" aber kein WLAN?** Dann läuft der Sketch, nur der
+   AP-Start klappt nicht → Punkt 3 ist am wahrscheinlichsten.
+5. **Anderer WLAN-Kanal:** im Sketch bei `WiFi.softAP(..., 1, 0)` die `1` auf
+   `6` oder `11` ändern.
+
 ## Häufige Anpassungen (im Sketch oben)
 
 - **`HARDWARE_TYPE`:** für dieses Modul ist `ICSTATION_HW` eingestellt (getestet).

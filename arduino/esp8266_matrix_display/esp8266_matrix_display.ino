@@ -287,9 +287,25 @@ void setup() {
   applyDisplaySettings();
 
   // Access Point starten
+  // Reihenfolge/Reset bewusst so: erst sauber trennen, Modus setzen, dann
+  // softAP() -- und dessen Rueckgabewert pruefen. Danach die IP festlegen.
+  WiFi.persistent(false);            // Flash-Schreibzugriffe vermeiden
+  WiFi.disconnect(true);
   WiFi.mode(WIFI_AP);
+  delay(100);
+
+  // SSID sichtbar, Kanal 1. Bei Verbindungsproblemen: Kanal 6 oder 11 testen.
+  bool apOk = WiFi.softAP(AP_SSID, AP_PASSWORD, 1 /*Kanal*/, 0 /*sichtbar*/);
+  delay(100);
   WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-  WiFi.softAP(AP_SSID, AP_PASSWORD);
+
+  Serial.println();
+  Serial.print("softAP() Ergebnis: ");
+  Serial.println(apOk ? "OK" : "FEHLER");
+  Serial.print("SSID: ");
+  Serial.println(AP_SSID);
+  Serial.print("AP-MAC: ");
+  Serial.println(WiFi.softAPmacAddress());
   Serial.print("Access Point IP: ");
   Serial.println(WiFi.softAPIP());
 
