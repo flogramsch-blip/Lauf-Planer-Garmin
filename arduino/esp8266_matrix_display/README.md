@@ -49,8 +49,9 @@ und liefert eine kleine Weboberfläche aus.
 
 ## Häufige Anpassungen (im Sketch oben)
 
-- **Anzeige gespiegelt / Blöcke vertauscht?** → `HARDWARE_TYPE` auf einen anderen
-  Wert setzen: `GENERIC_HW`, `ICSTATION_HW` oder `PAROLA_HW` statt `FC16_HW`.
+- **`HARDWARE_TYPE`:** für dieses Modul ist `ICSTATION_HW` eingestellt (getestet).
+  Falls die Anzeige mal gespiegelt / Blöcke vertauscht sind → `FC16_HW`,
+  `GENERIC_HW` oder `PAROLA_HW` probieren.
 - **WLAN-Name/Passwort:** `AP_SSID` / `AP_PASSWORD` ändern (Passwort ≥ 8 Zeichen).
 - **Andere Displaygröße** (z. B. 8×64 = 8 Blöcke): `MAX_DEVICES` anpassen.
 - **Eigene Zeichen:** im Array `customChars[]` ergänzen. Jedes Byte ist eine

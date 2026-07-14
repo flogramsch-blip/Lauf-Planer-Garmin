@@ -29,10 +29,10 @@
 // ---------------------------------------------------------------------------
 // HARDWARE-KONFIGURATION
 // ---------------------------------------------------------------------------
-// Fast alle guenstigen "4-in-1" 8x32 Module sind vom Typ FC16_HW.
-// Falls die Anzeige spiegelverkehrt / Bloecke vertauscht sind, hier eine der
-// anderen Varianten testen: GENERIC_HW, ICSTATION_HW, PAROLA_HW
-#define HARDWARE_TYPE MD_MAX72XX::FC16_HW
+// Fuer dieses Modul getestet und korrekt: ICSTATION_HW.
+// Falls die Anzeige mal spiegelverkehrt / Bloecke vertauscht sind, hier eine
+// der anderen Varianten testen: FC16_HW, GENERIC_HW, PAROLA_HW
+#define HARDWARE_TYPE MD_MAX72XX::ICSTATION_HW
 #define MAX_DEVICES   4          // 8x32 = 4 Bloecke a 8x8
 
 // Verkabelung Wemos D1 mini <-> MAX7219
