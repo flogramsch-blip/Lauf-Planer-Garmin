@@ -1,9 +1,12 @@
 /*
- * ESP8266 (Wemos D1 mini) + 8x32 MAX7219 Dot-Matrix
- * -------------------------------------------------
+ * ESP8266 (Wemos D1 mini) + 8x32 MAX7219 Dot-Matrix + DHT11
+ * ---------------------------------------------------------
  * WLAN-Steuerung einer Laufschrift / statischem Text -- komplett OFFLINE.
  * Der ESP spannt ein eigenes WLAN (Access Point) auf, es wird KEIN
  * Router und KEIN externer Server benoetigt.
+ *
+ * Optional: Ein DHT11 misst Temperatur + Luftfeuchte. In der Weboberflaeche
+ * kann man auswaehlen, ob diese Werte hinter dem Text mitlaufen sollen.
  *
  * Bedienung:
  *   1) ESP mit Strom versorgen (USB)
@@ -14,6 +17,7 @@
  * Benoetigte Bibliotheken (Arduino IDE -> Bibliotheksverwalter):
  *   - MD_Parola   (von majicDesigns)
  *   - MD_MAX72XX  (von majicDesigns)   <- wird bei Parola meist mit installiert
+ *   - DHTesp      (von beegee-tokyo)   <- fuer den DHT11-Sensor
  *
  * Board (Arduino IDE -> Boardverwalter-URL eintragen, siehe README):
  *   "LOLIN(WEMOS) D1 R2 & mini"  (ESP8266)
@@ -25,6 +29,7 @@
 #include <MD_Parola.h>
 #include <MD_MAX72xx.h>
 #include <SPI.h>
+#include <DHTesp.h>
 
 // ---------------------------------------------------------------------------
 // HARDWARE-KONFIGURATION
@@ -43,7 +48,14 @@
 //   MAX7219 CS   -> D8 (GPIO15)         [frei waehlbar, unten definiert]
 #define CS_PIN  D8
 
+// DHT11 (3-Pin-Modul mit eingebautem Pull-up):
+//   VCC  -> 3V3
+//   GND  -> GND
+//   DATA -> D6 (GPIO12)
+#define DHT_PIN  D6
+
 MD_Parola display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+DHTesp     dht;
 
 // ---------------------------------------------------------------------------
 // WLAN ACCESS POINT
@@ -66,45 +78,53 @@ ESP8266WebServer server(80);
 // ---------------------------------------------------------------------------
 // ANZEIGE-ZUSTAND
 // ---------------------------------------------------------------------------
-char message[256] = "Hallo!";      // aktueller Text
-uint8_t brightness = 5;            // 0..15
-uint8_t scrollSpeed = 50;          // Frame-Verzoegerung in ms (kleiner = schneller)
-bool    scrollMode  = true;        // true = Laufschrift, false = statisch/zentriert
+char message[256]       = "Hallo!";   // vom Nutzer eingegebener Text (mit Tokens)
+char displayBuffer[384] = "Hallo!";   // fertig zusammengesetzter Anzeigetext
+uint8_t brightness  = 5;              // 0..15
+uint8_t scrollSpeed = 50;             // Frame-Verzoegerung in ms (kleiner = schneller)
+bool    scrollMode  = true;           // true = Laufschrift, false = statisch/zentriert
+bool    showTemp    = false;          // Temperatur hinter dem Text mitlaufen lassen
+bool    showHum     = false;          // Luftfeuchte hinter dem Text mitlaufen lassen
 
 textEffect_t effectIn  = PA_SCROLL_LEFT;
 textEffect_t effectOut = PA_NO_EFFECT;
 
 // ---------------------------------------------------------------------------
+// SENSORWERTE
+// ---------------------------------------------------------------------------
+float    curTemp = NAN;
+float    curHum  = NAN;
+bool     sensorOk = false;
+uint32_t lastSensorRead = 0;
+const uint32_t SENSOR_INTERVAL = 3000;   // DHT11 max. ~alle 2 s abfragen
+
+// ---------------------------------------------------------------------------
 // EIGENE / INDIVIDUELLE ZEICHEN
 // ---------------------------------------------------------------------------
-// Jedes Zeichen ist 8 Pixel hoch. Die Zahlen sind Spalten (hier 5 Spalten breit),
-// jedes Byte ist eine senkrechte Pixelspalte (Bit0 = oben ... Bit7 = unten).
-// Ueber einen Platzhalter-Code (hier ASCII 1..6) koennen sie im Text mit '\x01'
-// usw. verwendet werden -- z.B. Herz, Smiley, Pfeile.
+// Jedes Zeichen ist 8 Pixel hoch. Jedes Byte ist eine senkrechte Pixelspalte
+// (Bit0 = oben ... Bit7 = unten). Ueber einen internen Code (1..5) werden sie
+// im Text referenziert. In der Weboberflaeche fuegt man LESBARE Tokens wie
+// "{herz}" ein -- diese werden hier im Code in den Code umgewandelt (das ist
+// robuster als echte Steuerzeichen durch HTML/HTTP zu schicken).
 struct CustomChar {
-  uint8_t code;
-  uint8_t width;
-  uint8_t data[8];
+  uint8_t     code;
+  const char* token;
+  uint8_t     width;
+  uint8_t     data[8];
 };
 
 CustomChar customChars[] = {
-  // Herz
-  { 1, 5, { 0b00001100, 0b00011110, 0b00111100, 0b00011110, 0b00001100 } },
-  // Smiley :)
-  { 2, 5, { 0b00111100, 0b01000010, 0b10010101, 0b01000010, 0b00111100 } },
-  // Pfeil rechts
-  { 3, 5, { 0b00011000, 0b00011000, 0b00011000, 0b01111110, 0b00111100 } },
-  // Grad-Zeichen
-  { 4, 3, { 0b00000110, 0b00001001, 0b00000110 } },
-  // Note
-  { 5, 5, { 0b01100000, 0b01111110, 0b00000010, 0b00001100, 0b00001100 } },
+  { 1, "{herz}",   5, { 0b00001100, 0b00011110, 0b00111100, 0b00011110, 0b00001100 } },
+  { 2, "{smiley}", 5, { 0b00111100, 0b01000010, 0b10010101, 0b01000010, 0b00111100 } },
+  { 3, "{pfeil}",  5, { 0b00011000, 0b00011000, 0b00011000, 0b01111110, 0b00111100 } },
+  { 4, "{grad}",   3, { 0b00000110, 0b00001001, 0b00000110 } },
+  { 5, "{note}",   5, { 0b01100000, 0b01111110, 0b00000010, 0b00001100, 0b00001100 } },
 };
 const uint8_t NUM_CUSTOM = sizeof(customChars) / sizeof(customChars[0]);
 
 void registerCustomChars() {
   for (uint8_t i = 0; i < NUM_CUSTOM; i++) {
     // addChar erwartet einen Puffer im Font-Format: [Breite][Spalte0..N].
-    // Deshalb setzen wir die Breite als erstes Byte vor die Pixeldaten.
     uint8_t buf[9];
     buf[0] = customChars[i].width;
     for (uint8_t c = 0; c < customChars[i].width; c++) {
@@ -112,6 +132,15 @@ void registerCustomChars() {
     }
     display.addChar(customChars[i].code, buf);
   }
+}
+
+// Ersetzt alle "{token}" im Text durch das jeweilige Ein-Byte-Zeichen (Code 1..5).
+String applyTokens(const String& in) {
+  String out = in;
+  for (uint8_t i = 0; i < NUM_CUSTOM; i++) {
+    out.replace(customChars[i].token, String((char)customChars[i].code));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,11 +172,15 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
   .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:6px; }
   .chip { padding:8px 12px; background:#333; border-radius:6px; cursor:pointer; font-size:1.1rem; }
   .seg { display:flex; border:1px solid #444; border-radius:8px; overflow:hidden; margin-top:4px; }
-  .seg label { flex:1; margin:0; text-align:center; padding:10px; cursor:pointer; }
+  .seg label { flex:1; margin:0; text-align:center; cursor:pointer; }
   .seg input { display:none; }
   .seg input:checked + span { background:#2d7; color:#012; }
   .seg span { display:block; padding:10px; }
-  .seg label span { padding:0; }
+  .checks { display:flex; gap:18px; margin-top:6px; }
+  .checks label { display:flex; align-items:center; gap:8px; margin:0; color:#eee; font-size:1rem; cursor:pointer; }
+  .checks input { width:20px; height:20px; }
+  .sensor { margin-top:6px; padding:10px; background:#1c1c1c; border-radius:8px;
+    text-align:center; color:#9ad; font-size:1.05rem; }
   small { color:#888; }
   #status { text-align:center; margin-top:10px; height:1.2em; color:#2d7; font-size:.85rem; }
 </style>
@@ -161,13 +194,21 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
 
     <label>Sonderzeichen einfuegen</label>
     <div class="chips">
-      <span class="chip" data-c="&#1;">&#10084;</span>
-      <span class="chip" data-c="&#2;">&#128578;</span>
-      <span class="chip" data-c="&#3;">&#10132;</span>
-      <span class="chip" data-c="&#4;">&#176;</span>
-      <span class="chip" data-c="&#5;">&#9834;</span>
+      <span class="chip" data-c="{herz}">&#10084;</span>
+      <span class="chip" data-c="{smiley}">&#128578;</span>
+      <span class="chip" data-c="{pfeil}">&#10132;</span>
+      <span class="chip" data-c="{grad}">&#176;</span>
+      <span class="chip" data-c="{note}">&#9834;</span>
     </div>
     <small>Fuegt eigene Pixel-Zeichen an der Cursorposition ein.</small>
+
+    <label>Sensor (DHT11)</label>
+    <div class="sensor">%SENSOR%</div>
+    <div class="checks">
+      <label><input type="checkbox" name="temp" value="1" %TEMP_CHK%> Temperatur mitlaufen</label>
+      <label><input type="checkbox" name="hum" value="1" %HUM_CHK%> Feuchte mitlaufen</label>
+    </div>
+    <small>Laeuft jeweils hinter dem Text durch. Beides abwaehlen = nur Text.</small>
 
     <label>Modus</label>
     <div class="seg">
@@ -225,6 +266,13 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
 // ---------------------------------------------------------------------------
 // HELFER
 // ---------------------------------------------------------------------------
+String sensorLabel() {
+  if (!sensorOk) return "kein Sensor / Lesefehler";
+  String s = String((int)round(curTemp)) + " &#176;C  /  ";
+  s += String((int)round(curHum)) + " %";
+  return s;
+}
+
 String buildPage() {
   String html = FPSTR(PAGE_HTML);
   html.replace("%MSG%", String(message));
@@ -232,10 +280,34 @@ String buildPage() {
   html.replace("%BRI%", String(brightness));
   html.replace("%SCROLL_ON%",  scrollMode ? "checked" : "");
   html.replace("%SCROLL_OFF%", scrollMode ? "" : "checked");
+  html.replace("%TEMP_CHK%", showTemp ? "checked" : "");
+  html.replace("%HUM_CHK%",  showHum  ? "checked" : "");
+  html.replace("%SENSOR%", sensorLabel());
   return html;
 }
 
-void applyDisplaySettings() {
+// Baut den kompletten Anzeigetext: Nutzertext + optional Temperatur + Feuchte.
+// Die Sensorwerte laufen dadurch hinter dem Text mit und werden bei jedem
+// Scroll-Durchlauf mit frischen Messwerten neu zusammengesetzt.
+void composeText() {
+  String text = applyTokens(String(message));
+
+  if (showTemp) {
+    text += "   ";
+    // "{grad}" -> Grad-Zeichen (Code 4)
+    text += sensorOk ? (String((int)round(curTemp)) + applyTokens("{grad}") + "C")
+                     : String("--" ) + applyTokens("{grad}") + "C";
+  }
+  if (showHum) {
+    text += "   ";
+    text += sensorOk ? (String((int)round(curHum)) + "%") : String("--%");
+  }
+
+  text.toCharArray(displayBuffer, sizeof(displayBuffer));
+}
+
+void showCurrent() {
+  composeText();
   display.setIntensity(brightness);
   textPosition_t align;
   if (scrollMode) {
@@ -247,10 +319,21 @@ void applyDisplaySettings() {
     effectOut = PA_NO_EFFECT;
     align     = PA_CENTER;
   }
-  display.displayText(message, align,
+  display.displayText(displayBuffer, align,
                       scrollSpeed, scrollMode ? 0 : 3000,
                       effectIn, effectOut);
   display.displayReset();
+}
+
+void readSensor() {
+  TempAndHumidity th = dht.getTempAndHumidity();
+  if (!isnan(th.temperature) && !isnan(th.humidity)) {
+    curTemp  = th.temperature;
+    curHum   = th.humidity;
+    sensorOk = true;
+  } else {
+    sensorOk = false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -267,13 +350,15 @@ void handleSet() {
   if (server.hasArg("bri"))   brightness  = constrain(server.arg("bri").toInt(), 0, 15);
   if (server.hasArg("speed")) scrollSpeed = constrain(server.arg("speed").toInt(), 5, 300);
   if (server.hasArg("mode"))  scrollMode  = (server.arg("mode").toInt() == 1);
+  // Checkboxen: nur vorhanden, wenn angehakt.
+  showTemp = server.hasArg("temp");
+  showHum  = server.hasArg("hum");
 
-  applyDisplaySettings();
+  showCurrent();
   server.send(200, "text/plain", "OK");
 }
 
-// Captive-Portal: jede unbekannte Adresse leitet auf die Startseite,
-// damit sich beim Verbinden automatisch die Seite oeffnet.
+// Captive-Portal: jede unbekannte Adresse leitet auf die Startseite.
 void handleNotFound() {
   server.sendHeader("Location", String("http://") + apIP.toString(), true);
   server.send(302, "text/plain", "");
@@ -286,25 +371,25 @@ void setup() {
   Serial.begin(115200);
   Serial.println();
 
+  // Sensor starten
+  dht.setup(DHT_PIN, DHTesp::DHT11);
+
   // Display starten
   display.begin();
   display.setIntensity(brightness);
   display.displayClear();
   registerCustomChars();
-  applyDisplaySettings();
+
+  readSensor();
+  showCurrent();
 
   // Access Point starten
-  // Reihenfolge/Reset bewusst so: erst sauber trennen, Modus setzen, dann
-  // softAP() -- und dessen Rueckgabewert pruefen. Danach die IP festlegen.
   WiFi.persistent(false);            // Flash-Schreibzugriffe vermeiden
   WiFi.disconnect(true);
   WiFi.mode(WIFI_AP);
-  // 11b: robusteste Modulation, beste Reichweite -> AP wird am zuverlaessigsten
-  // erkannt. Hilft, wenn das Netz bei knapper Stromversorgung nicht auftaucht.
   WiFi.setPhyMode(WIFI_PHY_MODE_11B);
   delay(100);
 
-  // Bei OPEN_AP kein Passwort uebergeben -> offenes Netz.
   bool apOk = OPEN_AP
     ? WiFi.softAP(AP_SSID, (const char*)nullptr, AP_CHANNEL, 0 /*sichtbar*/)
     : WiFi.softAP(AP_SSID, AP_PASSWORD, AP_CHANNEL, 0 /*sichtbar*/);
@@ -340,8 +425,14 @@ void loop() {
   dnsServer.processNextRequest();
   server.handleClient();
 
-  // Animation weiterlaufen lassen; bei statischem Text automatisch neu starten
+  // Sensor regelmaessig auslesen (DHT11 vertraegt max. ~alle 2 s)
+  if (millis() - lastSensorRead >= SENSOR_INTERVAL) {
+    lastSensorRead = millis();
+    readSensor();
+  }
+
+  // Animation weiterlaufen lassen; am Ende mit frischen Werten neu aufbauen
   if (display.displayAnimate()) {
-    display.displayReset();
+    showCurrent();
   }
 }

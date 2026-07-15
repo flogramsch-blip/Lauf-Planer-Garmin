@@ -8,9 +8,13 @@ und liefert eine kleine Weboberfläche aus.
 - Laufschrift **oder** statischer/zentrierter Text
 - Geschwindigkeit und Helligkeit live einstellbar
 - Eigene Pixel-Zeichen (Herz, Smiley, Pfeil, Grad-Zeichen, Note) per Knopfdruck einfügbar
+- **Temperatur + Luftfeuchte** (DHT11) optional hinter dem Text mitlaufen lassen —
+  einzeln an-/abwählbar (beides, nur Temp, nur Feuchte oder nur Text)
 - Captive-Portal: beim Verbinden öffnet sich die Seite meist automatisch
 
 ## Hardware & Verkabelung
+
+**MAX7219-Matrix:**
 
 | MAX7219-Modul | Wemos D1 mini      | Hinweis                       |
 |---------------|--------------------|-------------------------------|
@@ -20,7 +24,19 @@ und liefert eine kleine Weboberfläche aus.
 | CLK           | D5 (GPIO14, SCK)   | durch SPI fest vorgegeben     |
 | CS            | D8 (GPIO15)        | im Sketch frei wählbar        |
 
-> Bei größeren Modulen kann der USB-Strom knapp werden. Wenn die Anzeige
+**DHT11-Sensor (3-Pin-Modul mit eingebautem Widerstand):**
+
+| DHT11 | Wemos D1 mini     | Hinweis                          |
+|-------|-------------------|----------------------------------|
+| VCC / + | 3V3             | DHT11 läuft mit 3,3 V            |
+| DATA / S | D6 (GPIO12)    | Datenleitung, im Sketch wählbar  |
+| GND / − | GND             |                                  |
+
+> Der DHT11 ist **optional** — ohne Sensor läuft der Rest normal weiter, die
+> Weboberfläche zeigt dann „kein Sensor / Lesefehler". Beim 3-Pin-Modul ist der
+> nötige Pull-up-Widerstand schon auf der Platine.
+
+> Bei größeren Matrix-Modulen kann der USB-Strom knapp werden. Wenn die Anzeige
 > flackert oder der ESP neu startet, ein externes 5V-Netzteil verwenden.
 
 ## Arduino IDE einrichten
@@ -34,6 +50,7 @@ und liefert eine kleine Weboberfläche aus.
 2. **Bibliotheken installieren** (*Werkzeuge → Bibliotheken verwalten*)
    - `MD_Parola` (von majicDesigns)
    - `MD_MAX72XX` (wird meist automatisch mitinstalliert)
+   - `DHTesp` (von beegee-tokyo, im Verwalter als „DHT sensor library for ESPx")
 
 3. **Hochladen**
    - `esp8266_matrix_display.ino` öffnen, Upload-Button drücken.
@@ -46,6 +63,20 @@ und liefert eine kleine Weboberfläche aus.
 3. Browser öffnen → **http://192.168.4.1**
    (oder die automatisch aufpoppende Portal-Seite nutzen).
 4. Text eingeben, Modus/Geschwindigkeit/Helligkeit wählen, **An Display senden**.
+
+### Sonderzeichen
+Die Chip-Buttons fügen lesbare **Tokens** in den Text ein: `{herz}`, `{smiley}`,
+`{pfeil}`, `{grad}`, `{note}`. Der ESP wandelt sie beim Anzeigen in die
+Pixel-Zeichen um. (Diese Tokens sind robuster als echte Steuerzeichen, die
+manche Browser verschlucken — daher blieb die Matrix vorher leer.)
+
+### Temperatur & Feuchte
+Unter „Sensor (DHT11)" zeigt die Seite den aktuellen Messwert. Mit den zwei
+Häkchen wählst du, was **hinter dem Text mitläuft**:
+- beide an → Text, dann Temperatur, dann Feuchte
+- nur eins an → nur dieser Wert läuft mit
+- beide aus → nur der Text
+Die Werte werden bei jedem Durchlauf frisch gemessen.
 
 ## WLAN erscheint nicht? — Fehlersuche
 
@@ -80,9 +111,11 @@ und liefert eine kleine Weboberfläche aus.
   `GENERIC_HW` oder `PAROLA_HW` probieren.
 - **WLAN-Name/Passwort:** `AP_SSID` / `AP_PASSWORD` ändern (Passwort ≥ 8 Zeichen).
 - **Andere Displaygröße** (z. B. 8×64 = 8 Blöcke): `MAX_DEVICES` anpassen.
-- **Eigene Zeichen:** im Array `customChars[]` ergänzen. Jedes Byte ist eine
-  senkrechte Pixelspalte (Bit 0 = oben … Bit 7 = unten). Über den `code`
-  (1…5) im Text als `\x01`…`\x05` bzw. per Chip-Button nutzbar.
+- **Eigene Zeichen:** im Array `customChars[]` ergänzen — je Eintrag `code`
+  (1…5), ein `token` (z. B. `"{stern}"`), `width` und die Spalten-Bytes. Jedes
+  Byte ist eine senkrechte Pixelspalte (Bit 0 = oben … Bit 7 = unten). Das Token
+  im Text (bzw. per Chip-Button) wird beim Anzeigen ins Pixel-Zeichen umgewandelt.
+- **DHT-Pin:** `DHT_PIN` (Standard `D6`). **Sensor-Intervall:** `SENSOR_INTERVAL`.
 
 ## Zeichen selbst zeichnen
 
