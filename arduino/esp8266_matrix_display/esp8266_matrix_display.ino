@@ -369,8 +369,17 @@ void readSensor() {
     curTemp  = th.temperature;
     curHum   = th.humidity;
     sensorOk = true;
+    Serial.print("[DHT11] Temperatur: ");
+    Serial.print(curTemp, 1);
+    Serial.print(" C   Feuchte: ");
+    Serial.print(curHum, 1);
+    Serial.println(" %");
   } else {
     sensorOk = false;
+    // getStatusString() liefert z.B. "TIMEOUT_ERROR" oder "CHECKSUM_ERROR"
+    Serial.print("[DHT11] Lesefehler: ");
+    Serial.print(dht.getStatusString());
+    Serial.println("  (Verkabelung/Pin pruefen: DATA an D6, VCC an 3V3, GND an GND)");
   }
 }
 
