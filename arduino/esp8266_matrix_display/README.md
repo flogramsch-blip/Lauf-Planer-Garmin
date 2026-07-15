@@ -10,6 +10,8 @@ und liefert eine kleine Weboberfläche aus.
 - Eigene Pixel-Zeichen (Herz, Smiley, Pfeil, Grad-Zeichen, Note) per Knopfdruck einfügbar
 - **Temperatur + Luftfeuchte** (DHT11) optional hinter dem Text mitlaufen lassen —
   einzeln an-/abwählbar (beides, nur Temp, nur Feuchte oder nur Text)
+- **Matrix-Größe (8×32 oder 8×64) in der Weboberfläche wählbar** — die Wahl wird
+  dauerhaft gespeichert (übersteht den Neustart)
 - Captive-Portal: beim Verbinden öffnet sich die Seite meist automatisch
 
 ## Hardware & Verkabelung
@@ -78,6 +80,14 @@ Häkchen wählst du, was **hinter dem Text mitläuft**:
 - beide aus → nur der Text
 Die Werte werden bei jedem Durchlauf frisch gemessen.
 
+### Matrix-Größe (8×32 / 8×64)
+Unter „Matrix-Größe" wählst du, wie viele Module angeschlossen sind
+(8×32 = 4 Module, 8×64 = 8 Module). Die Auswahl muss zur **tatsächlichen
+Hardware** passen, weil die Länge der MAX7219-Kette beim Start festgelegt wird.
+Deshalb **startet das Display bei einer Änderung einmal kurz neu** — die Wahl
+wird im EEPROM gespeichert und beim nächsten Start automatisch verwendet.
+Der Text setzt sich nach dem Neustart auf „Hallo!" zurück.
+
 ## WLAN erscheint nicht? — Fehlersuche
 
 1. **Seriellen Monitor öffnen** (Werkzeuge → Serieller Monitor), **115200 Baud**
@@ -110,7 +120,8 @@ Die Werte werden bei jedem Durchlauf frisch gemessen.
   Falls die Anzeige mal gespiegelt / Blöcke vertauscht sind → `FC16_HW`,
   `GENERIC_HW` oder `PAROLA_HW` probieren.
 - **WLAN-Name/Passwort:** `AP_SSID` / `AP_PASSWORD` ändern (Passwort ≥ 8 Zeichen).
-- **Andere Displaygröße** (z. B. 8×64 = 8 Blöcke): `MAX_DEVICES` anpassen.
+- **Standard-Displaygröße** beim allerersten Start: `MODULES_DEFAULT` (4 oder 8).
+  Danach wird die in der Weboberfläche gewählte Größe aus dem EEPROM verwendet.
 - **Eigene Zeichen:** im Array `customChars[]` ergänzen — je Eintrag `code`
   (1…5), ein `token` (z. B. `"{stern}"`), `width` und die Spalten-Bytes. Jedes
   Byte ist eine senkrechte Pixelspalte (Bit 0 = oben … Bit 7 = unten). Das Token

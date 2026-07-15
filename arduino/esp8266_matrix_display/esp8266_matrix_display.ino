@@ -30,6 +30,7 @@
 #include <MD_MAX72xx.h>
 #include <SPI.h>
 #include <DHTesp.h>
+#include <EEPROM.h>
 
 // ---------------------------------------------------------------------------
 // HARDWARE-KONFIGURATION
@@ -38,7 +39,11 @@
 // Falls die Anzeige mal spiegelverkehrt / Bloecke vertauscht sind, hier eine
 // der anderen Varianten testen: FC16_HW, GENERIC_HW, PAROLA_HW
 #define HARDWARE_TYPE MD_MAX72XX::ICSTATION_HW
-#define MAX_DEVICES   4          // 8x32 = 4 Bloecke a 8x8
+
+// Matrix-Groesse: 8x32 = 4 Module, 8x64 = 8 Module. Der Wert wird in der
+// Weboberflaeche gewaehlt und im EEPROM gespeichert; DEFAULT gilt beim ersten
+// Start (noch nichts gespeichert). Die Kette wird beim Boot damit angelegt.
+#define MODULES_DEFAULT  4
 
 // Verkabelung Wemos D1 mini <-> MAX7219
 //   MAX7219 VCC  -> 5V (VBUS/5V vom Wemos)
@@ -54,8 +59,28 @@
 //   DATA -> D6 (GPIO12)
 #define DHT_PIN  D6
 
-MD_Parola display = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+// Display wird beim Boot mit der gespeicherten Modulzahl erzeugt (Pointer).
+MD_Parola* display = nullptr;
+uint8_t    moduleCount = MODULES_DEFAULT;   // 4 (8x32) oder 8 (8x64)
 DHTesp     dht;
+
+// EEPROM: Modulzahl dauerhaft speichern
+#define EEPROM_SIZE   16
+#define EEPROM_MAGIC  0xA6          // Kennung fuer "gueltig gespeichert"
+
+void loadModuleCount() {
+  EEPROM.begin(EEPROM_SIZE);
+  if (EEPROM.read(0) == EEPROM_MAGIC) {
+    uint8_t m = EEPROM.read(1);
+    if (m == 4 || m == 8) moduleCount = m;
+  }
+}
+
+void saveModuleCount(uint8_t m) {
+  EEPROM.write(0, EEPROM_MAGIC);
+  EEPROM.write(1, m);
+  EEPROM.commit();
+}
 
 // ---------------------------------------------------------------------------
 // WLAN ACCESS POINT
@@ -98,6 +123,8 @@ bool     sensorOk = false;
 uint32_t lastSensorRead = 0;
 const uint32_t SENSOR_INTERVAL = 3000;   // DHT11 max. ~alle 2 s abfragen
 
+uint32_t pendingRestart = 0;             // != 0 -> Neustart nach kurzer Wartezeit
+
 // ---------------------------------------------------------------------------
 // EIGENE / INDIVIDUELLE ZEICHEN
 // ---------------------------------------------------------------------------
@@ -130,7 +157,7 @@ void registerCustomChars() {
     for (uint8_t c = 0; c < customChars[i].width; c++) {
       buf[c + 1] = customChars[i].data[c];
     }
-    display.addChar(customChars[i].code, buf);
+    display->addChar(customChars[i].code, buf);
   }
 }
 
@@ -216,6 +243,13 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
       <label><input type="radio" name="mode" value="0" %SCROLL_OFF%><span>Statisch</span></label>
     </div>
 
+    <label>Matrix-Groesse</label>
+    <div class="seg">
+      <label><input type="radio" name="modules" value="4" %MOD32%><span>8&times;32</span></label>
+      <label><input type="radio" name="modules" value="8" %MOD64%><span>8&times;64</span></label>
+    </div>
+    <small>Muss zur angeschlossenen Hardware passen. Bei Aenderung startet das Display kurz neu.</small>
+
     <label for="speed">Geschwindigkeit <small>(kleiner = schneller)</small></label>
     <div class="row">
       <input type="range" id="speed" name="speed" min="10" max="150" value="%SPEED%">
@@ -251,12 +285,14 @@ const char PAGE_HTML[] PROGMEM = R"HTML(
     const data = new URLSearchParams(new FormData(ev.target));
     $('#status').textContent = 'senden...';
     try {
-      await fetch('/set', { method:'POST', body:data });
-      $('#status').textContent = 'gesendet ✓';
+      const res = await fetch('/set', { method:'POST', body:data });
+      const txt = await res.text();
+      $('#status').textContent = (txt.trim() === 'RESTART')
+        ? 'Groesse geaendert – Display startet neu…' : 'gesendet ✓';
     } catch (err) {
       $('#status').textContent = 'Fehler';
     }
-    setTimeout(() => $('#status').textContent = '', 1500);
+    setTimeout(() => $('#status').textContent = '', 2500);
   };
 </script>
 </body>
@@ -282,6 +318,8 @@ String buildPage() {
   html.replace("%SCROLL_OFF%", scrollMode ? "" : "checked");
   html.replace("%TEMP_CHK%", showTemp ? "checked" : "");
   html.replace("%HUM_CHK%",  showHum  ? "checked" : "");
+  html.replace("%MOD32%", moduleCount == 4 ? "checked" : "");
+  html.replace("%MOD64%", moduleCount == 8 ? "checked" : "");
   html.replace("%SENSOR%", sensorLabel());
   return html;
 }
@@ -308,7 +346,7 @@ void composeText() {
 
 void showCurrent() {
   composeText();
-  display.setIntensity(brightness);
+  display->setIntensity(brightness);
   textPosition_t align;
   if (scrollMode) {
     effectIn  = PA_SCROLL_LEFT;
@@ -319,10 +357,10 @@ void showCurrent() {
     effectOut = PA_NO_EFFECT;
     align     = PA_CENTER;
   }
-  display.displayText(displayBuffer, align,
-                      scrollSpeed, scrollMode ? 0 : 3000,
-                      effectIn, effectOut);
-  display.displayReset();
+  display->displayText(displayBuffer, align,
+                       scrollSpeed, scrollMode ? 0 : 3000,
+                       effectIn, effectOut);
+  display->displayReset();
 }
 
 void readSensor() {
@@ -344,6 +382,18 @@ void handleRoot() {
 }
 
 void handleSet() {
+  // Matrix-Groesse geaendert? -> speichern und neu starten (Kettenlaenge steht
+  // beim Boot fest, daher ist ein Neustart noetig).
+  if (server.hasArg("modules")) {
+    uint8_t m = server.arg("modules").toInt();
+    if ((m == 4 || m == 8) && m != moduleCount) {
+      saveModuleCount(m);
+      server.send(200, "text/plain", "RESTART");
+      pendingRestart = millis();     // kurz warten, damit die Antwort rausgeht
+      return;
+    }
+  }
+
   if (server.hasArg("msg")) {
     server.arg("msg").toCharArray(message, sizeof(message));
   }
@@ -374,14 +424,22 @@ void setup() {
   // Sensor starten
   dht.setup(DHT_PIN, DHTesp::DHT11);
 
+  // Gespeicherte Matrix-Groesse laden und Display damit anlegen
+  loadModuleCount();
+  display = new MD_Parola(HARDWARE_TYPE, CS_PIN, moduleCount);
+
   // Display starten
-  display.begin();
-  display.setIntensity(brightness);
-  display.displayClear();
+  display->begin();
+  display->setIntensity(brightness);
+  display->displayClear();
   registerCustomChars();
 
   readSensor();
   showCurrent();
+
+  Serial.print("Matrix-Module: ");
+  Serial.print(moduleCount);
+  Serial.println(moduleCount == 8 ? " (8x64)" : " (8x32)");
 
   // Access Point starten
   WiFi.persistent(false);            // Flash-Schreibzugriffe vermeiden
@@ -425,6 +483,11 @@ void loop() {
   dnsServer.processNextRequest();
   server.handleClient();
 
+  // Nach Groessenwechsel: kurz warten (Antwort rausschicken), dann neu starten
+  if (pendingRestart && millis() - pendingRestart > 800) {
+    ESP.restart();
+  }
+
   // Sensor regelmaessig auslesen (DHT11 vertraegt max. ~alle 2 s)
   if (millis() - lastSensorRead >= SENSOR_INTERVAL) {
     lastSensorRead = millis();
@@ -432,7 +495,7 @@ void loop() {
   }
 
   // Animation weiterlaufen lassen; am Ende mit frischen Werten neu aufbauen
-  if (display.displayAnimate()) {
+  if (display->displayAnimate()) {
     showCurrent();
   }
 }
